@@ -1,0 +1,149 @@
+name: DeltaGram Windows
+
+# Builds DeltaGram.exe (x64, Qt 6, Release) and uploads it as a workflow
+# artifact. Trigger it manually from the Actions tab or on every push to the
+# default branch.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'changelog.txt'
+      - 'LEGAL'
+      - 'LICENSE'
+
+jobs:
+  windows:
+    name: Windows x64 Qt6
+    runs-on: windows-latest
+
+    env:
+      PREPARE_PATH: "Telegram/build/prepare/prepare.py"
+      ARTIFACT_NAME: "DeltaGram Windows x64 qt6"
+
+    defaults:
+      run:
+        shell: cmd
+
+    steps:
+      - name: Prepare directories.
+        run: |
+          mkdir %userprofile%\TBuild\Libraries
+          mklink /d %GITHUB_WORKSPACE%\TBuild %userprofile%\TBuild
+          echo TBUILD=%GITHUB_WORKSPACE%\TBuild>>%GITHUB_ENV%
+          echo LibrariesPath=%GITHUB_WORKSPACE%\TBuild\Libraries\win64>>%GITHUB_ENV%
+
+      - name: Get repository name.
+        shell: bash
+        run: echo "REPO_NAME=${GITHUB_REPOSITORY##*/}" >> $GITHUB_ENV
+
+      - name: Clone.
+        uses: actions/checkout@v7
+        with:
+          # The source archive shipped to the user has no submodules; CI pulls
+          # them recursively here.
+          submodules: recursive
+          path: ${{ env.TBUILD }}\${{ env.REPO_NAME }}
+
+      - name: First set up.
+        shell: bash
+        run: |
+          DOCPATH=$TBUILD/$REPO_NAME/docs/building-win.md
+          SDK="$(grep "SDK version" $DOCPATH | sed -r 's/.*\*\*(.*)\*\* SDK version.*/\1/')"
+          echo "SDK=$SDK" >> $GITHUB_ENV
+
+          echo "$(sha256sum $TBUILD/$REPO_NAME/$PREPARE_PATH | awk '{ print $1 }')" >> CACHE_KEY.txt
+          echo "$SDK" >> CACHE_KEY.txt
+          echo "CACHE_KEY=$(sha256sum CACHE_KEY.txt | awk '{ print $1 }')" >> $GITHUB_ENV
+
+      - uses: Eden-CI/msvc-dev-cmd@master
+        name: Native Tools Command Prompt.
+        with:
+          arch: x64
+          sdk: ${{ env.SDK }}
+          toolset: 14.44
+
+      - name: NuGet sources.
+        run: |
+          nuget sources Disable -Name "Microsoft Visual Studio Offline Packages"
+          nuget sources Add -Source https://api.nuget.org/v3/index.json & exit 0
+
+      - name: ThirdParty cache.
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.TBUILD }}\ThirdParty
+          key: ${{ runner.OS }}-${{ runner.arch }}-third-party-${{ env.CACHE_KEY }}
+          restore-keys: ${{ runner.OS }}-${{ runner.arch }}-third-party-
+
+      - name: Libraries cache.
+        uses: actions/cache@v6
+        with:
+          path: |
+            ${{ env.LibrariesPath }}\*
+            !${{ env.LibrariesPath }}\cache_keys
+            !${{ env.LibrariesPath }}\[qQ]t[_-]*
+            ${{ env.LibrariesPath }}\cache_keys\*
+            !${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
+          key: ${{ runner.OS }}-${{ runner.arch }}-libs-v2-${{ env.CACHE_KEY }}
+          restore-keys: ${{ runner.OS }}-${{ runner.arch }}-libs-v2-
+
+      - name: Qt cache.
+        uses: actions/cache@v6
+        with:
+          path: |
+            ${{ env.LibrariesPath }}\[qQ]t[_-]*
+            ${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
+          key: ${{ runner.OS }}-${{ runner.arch }}-qt6-${{ env.CACHE_KEY }}
+          restore-keys: ${{ runner.OS }}-${{ runner.arch }}-qt6-
+
+      - name: Libraries.
+        run: |
+          %TBUILD%\%REPO_NAME%\Telegram\build\prepare\win.bat skip-release silent qt6
+
+      - name: Free up some disk space.
+        shell: bash
+        run: find $LibrariesPath '(' '(' ! '(' -name '*.lib' -o -name '*.a' -o -name '*.exe' -o -name '*.h' -o -name '*.hpp' -o -name '*.inc' -o -name '*.cmake' -o -name '*.pc' -o -path '*/include/*' -o -path '*/objects-*' -o -path '*/cache_keys/*' -o -path '*/patches/*' -o -path '*/nv-codec-headers/*' ')' -type f ')' -o -empty ')' -delete
+
+      - name: Configure.
+        run: |
+          cd %TBUILD%\%REPO_NAME%\Telegram
+
+          call configure.bat ^
+          x64 ^
+          qt6 ^
+          -D TDESKTOP_API_ID=34122536 ^
+          -D TDESKTOP_API_HASH=8353c14fb75e19919d62f8e74432c51e ^
+          -D CMAKE_CONFIGURATION_TYPES=Release ^
+          -D DESKTOP_APP_DISABLE_AUTOUPDATE=ON ^
+          -D DESKTOP_APP_DISABLE_CRASH_REPORTS=ON
+
+      - name: Build DeltaGram.
+        run: cmake --build %TBUILD%\%REPO_NAME%\out --config Release --parallel
+
+      - name: Collect artifact.
+        run: |
+          set OUT=%TBUILD%\%REPO_NAME%\out\Release
+          mkdir artifact
+          copy %OUT%\DeltaGram.exe artifact\
+          if exist %OUT%\Updater.exe copy %OUT%\Updater.exe artifact\
+
+      - name: Deploy Qt runtime.
+        continue-on-error: true
+        run: |
+          for /d %%D in ("%LibrariesPath%\qt6_*") do set QTBIN=%%D\bin
+          if defined QTBIN "%QTBIN%\windeployqt.exe" --release --no-translations --no-opengl-sw --compiler-runtime artifact\DeltaGram.exe
+
+      - name: Zip portable build.
+        run: |
+          powershell -Command "Compress-Archive -Path artifact\* -DestinationPath DeltaGram-win64.zip -Force"
+
+      - uses: actions/upload-artifact@v7
+        name: Upload DeltaGram.exe.
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: |
+            artifact\
+            DeltaGram-win64.zip
+          retention-days: 14

@@ -37,6 +37,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mtproto/mtproto_config.h"
 #include "core/application.h"
 #include "core/click_handler_types.h"
+#include "deltagram/deltagram_frames.h"
 #include "window/notifications_manager.h"
 #include "window/window_session_controller.h"
 #include "window/main_window.h" // Window::LogoNoMargin.
@@ -459,6 +460,17 @@ void PeerData::paintUserpic(
 		size * ratio,
 		context.shape);
 	p.drawImage(QRect(context.position, QSize(size, size)), view.cached);
+
+	// DeltaGram: cosmetic avatar frame granted through the admin panel. The
+	// frame is always painted on top of the finished avatar so it never
+	// affects the userpic shape or clipping.
+	const auto frame = Deltagram::Frames::ForPeer(this);
+	if (frame != Deltagram::Frames::Kind::None) {
+		Deltagram::Frames::Paint(
+			p,
+			QRect(context.position, QSize(size, size)),
+			frame);
+	}
 }
 
 void PeerData::loadUserpic() {

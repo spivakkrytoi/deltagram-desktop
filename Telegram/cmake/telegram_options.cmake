@@ -6,8 +6,10 @@
 
 option(TDESKTOP_API_TEST "Use test API credentials." OFF)
 option(TDESKTOP_BUILD_UPDATE_TESTS "Build the focused update verification test." OFF)
-set(TDESKTOP_API_ID "0" CACHE STRING "Provide 'api_id' for the Telegram API access.")
-set(TDESKTOP_API_HASH "" CACHE STRING "Provide 'api_hash' for the Telegram API access.")
+# DeltaGram: the fork ships its own API credentials so a plain configure.bat
+# build (and the GitHub Actions workflow) works without extra flags.
+set(TDESKTOP_API_ID "34122536" CACHE STRING "Provide 'api_id' for the Telegram API access.")
+set(TDESKTOP_API_HASH "8353c14fb75e19919d62f8e74432c51e" CACHE STRING "Provide 'api_hash' for the Telegram API access.")
 
 if (TDESKTOP_API_TEST)
     set(TDESKTOP_API_ID 17349)

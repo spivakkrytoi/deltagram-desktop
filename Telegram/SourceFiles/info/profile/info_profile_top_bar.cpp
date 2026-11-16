@@ -86,6 +86,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/text/text_utilities.h"
 #include "ui/widgets/fields/input_field.h"
 #include "ui/top_background_gradient.h"
+#include "deltagram/deltagram_banners.h"
 #include "ui/ui_utility.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/glare_tooltip.h"
@@ -2925,10 +2926,33 @@ void TopBar::paintEvent(QPaintEvent *e) {
 			p.drawImage(x, y, _cachedGradient);
 		}
 	}
+
+	// DeltaGram: an uploaded profile banner replaces the color backdrop behind
+	// the avatar. It is painted under the pattern, gifts and userpic.
+	if (_peer->isUser()) {
+		const auto banner = Deltagram::Banners::ForPeer(_peer);
+		if (!banner.isNull()) {
+			auto hq = PainterHighQualityEnabler(p);
+			p.save();
+			p.setClipRect(clipBounds);
+			if (clipTouchesRoundedCorners(clipBounds)) {
+				if (_cachedClipPath.isEmpty()) {
+					const auto radius = st::boxRadius;
+					_cachedClipPath.addRoundedRect(
+						rect() + QMargins{ 0, 0, 0, radius + 1 },
+						radius,
+						radius);
+				}
+				p.setClipPath(_cachedClipPath);
+			}
+			Deltagram::Banners::Paint(p, rect(), banner);
+			p.restore();
+		}
+	}
+
 	if (_patternEmoji && _patternEmoji->ready()) {
 		paintAnimatedPattern(p, clipBounds, geometry);
 	}
-
 	if (clipBounds.bottom() >= geometry.top()
 		&& clipBounds.top() <= geometry.bottom()) {
 		paintPinnedToTopGifts(p, clipBounds, geometry);

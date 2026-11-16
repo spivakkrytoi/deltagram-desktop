@@ -854,6 +854,10 @@ PRIVATE
     data/data_wall_paper.h
     data/data_web_page.cpp
     data/data_web_page.h
+    deltagram/deltagram_banners.cpp
+    deltagram/deltagram_banners.h
+    deltagram/deltagram_frames.cpp
+    deltagram/deltagram_frames.h
     dialogs/ui/dialogs_layout.cpp
     dialogs/ui/dialogs_layout.h
     dialogs/ui/dialogs_message_view.cpp
@@ -3119,4 +3123,13 @@ if (LINUX AND DESKTOP_APP_USE_PACKAGED)
     install(FILES "../lib/xdg/org.telegram.desktop.desktop" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/applications")
     install(FILES "${CMAKE_CURRENT_BINARY_DIR}/org.telegram.desktop.service" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/dbus-1/services")
     install(FILES "${CMAKE_CURRENT_BINARY_DIR}/org.telegram.desktop.metainfo.xml" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/metainfo")
+endif()
+
+# ---------------------------------------------------------------------------
+# DeltaGram branding
+#
+# Keep the upstream CMake target name ("Telegram") so every existing reference
+# keeps working, but emit DeltaGram.exe on Windows.
+if (WIN32)
+    set_target_properties(Telegram PROPERTIES OUTPUT_NAME "DeltaGram")
 endif()
