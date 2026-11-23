@@ -145,7 +145,7 @@ jobs:
           if (-not (Test-Path $binary)) { throw 'DeltaGram.exe was not built.' }
           New-Item -ItemType Directory -Force artifact | Out-Null
           Copy-Item $binary artifact\DeltaGram.exe
-          $qt = Get-ChildItem "$env:LibrariesPath\qt6_*\bin\windeployqt.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          $qt = Get-ChildItem "$env:LibrariesPath\Qt-*\bin\windeployqt.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
           if ($qt) { & $qt.FullName --debug --no-translations artifact\DeltaGram.exe; if ($LASTEXITCODE) { throw 'windeployqt failed' } }
           Compress-Archive -Path artifact\* -DestinationPath DeltaGram-win64-preview.zip
 
