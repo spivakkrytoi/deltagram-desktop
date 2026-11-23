@@ -6,6 +6,10 @@
 
 add_executable(Telegram WIN32 MACOSX_BUNDLE)
 init_non_host_target(Telegram)
+if (WIN32)
+    # Preserve the upstream CMake target while emitting a distinct application.
+    set_target_properties(Telegram PROPERTIES OUTPUT_NAME "DeltaGram")
+endif()
 
 add_subdirectory(lib_rpl)
 add_subdirectory(lib_crl)

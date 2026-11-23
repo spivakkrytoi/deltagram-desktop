@@ -1,0 +1,105 @@
+name: DeltaGram Windows preview
+
+# Manual preview builds avoid starting upstream's large Windows/Linux/macOS
+# matrices on every source push. No build is advertised as feature-complete.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  win64:
+    runs-on: windows-latest
+    timeout-minutes: 360
+    defaults:
+      run:
+        shell: cmd
+    env:
+      TDESKTOP_API_ID: ${{ secrets.TDESKTOP_API_ID }}
+      TDESKTOP_API_HASH: ${{ secrets.TDESKTOP_API_HASH }}
+      REPO_NAME: deltagram-desktop
+      TBUILD: ${{ github.workspace }}\TBuild
+      LibrariesPath: ${{ github.workspace }}\TBuild\Libraries\win64
+    steps:
+      - name: Verify credentials exist
+        shell: pwsh
+        run: |
+          if (-not $env:TDESKTOP_API_ID -or -not $env:TDESKTOP_API_HASH) {
+            throw 'Set TDESKTOP_API_ID and TDESKTOP_API_HASH in repository Actions secrets.'
+          }
+
+      - name: Prepare build directories
+        run: |
+          mkdir %USERPROFILE%\TBuild\Libraries
+          mklink /d "%TBUILD%" "%USERPROFILE%\TBuild"
+
+      - name: Checkout complete source
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+          path: TBuild/deltagram-desktop
+
+      - name: Select compiler and Windows SDK
+        uses: Eden-CI/msvc-dev-cmd@master
+        with:
+          arch: x64
+          sdk: 10.0.26100.0
+          toolset: 14.44
+
+      - name: Configure NuGet
+        run: |
+          nuget sources Disable -Name "Microsoft Visual Studio Offline Packages"
+          nuget sources Add -Source https://api.nuget.org/v3/index.json & exit 0
+
+      - name: Cache third-party build tools
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.TBUILD }}\ThirdParty
+          key: desktop-thirdparty-${{ hashFiles('TBuild/deltagram-desktop/Telegram/build/prepare/prepare.py') }}
+
+      - name: Cache prepared libraries
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.LibrariesPath }}
+          key: desktop-win64-libraries-${{ hashFiles('TBuild/deltagram-desktop/Telegram/build/prepare/prepare.py') }}
+
+      - name: Prepare libraries
+        run: |
+          set CARGO_INCREMENTAL=0
+          call "%TBUILD%\%REPO_NAME%\Telegram\build\prepare\win.bat" skip-release silent
+
+      - name: Configure and build DeltaGram
+        run: |
+          cd /d "%TBUILD%\%REPO_NAME%\Telegram"
+          call configure.bat x64 qt6 ^
+            -D TDESKTOP_API_ID=%TDESKTOP_API_ID% ^
+            -D TDESKTOP_API_HASH=%TDESKTOP_API_HASH% ^
+            -D CMAKE_CONFIGURATION_TYPES=Release ^
+            -D DESKTOP_APP_ENABLE_LTO=OFF ^
+            -D DESKTOP_APP_DISABLE_AUTOUPDATE=ON ^
+            -D DESKTOP_APP_DISABLE_CRASH_REPORTS=ON
+          if errorlevel 1 exit /b 1
+          cmake --build ..\out --config Release --target Telegram --parallel 4
+          if errorlevel 1 exit /b 1
+
+      - name: Package preview executable
+        shell: pwsh
+        run: |
+          $binary = Join-Path $env:TBUILD "$env:REPO_NAME\out\Release\DeltaGram.exe"
+          if (-not (Test-Path $binary)) { throw 'DeltaGram.exe was not built.' }
+          New-Item -ItemType Directory -Force artifact | Out-Null
+          Copy-Item $binary artifact\DeltaGram.exe
+          $qt = Get-ChildItem "$env:LibrariesPath\qt6_*\bin\windeployqt.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($qt) { & $qt.FullName --release --no-translations artifact\DeltaGram.exe; if ($LASTEXITCODE) { throw 'windeployqt failed' } }
+          Compress-Archive -Path artifact\* -DestinationPath DeltaGram-win64-preview.zip
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: DeltaGram-win64-preview
+          path: |
+            artifact/
+            DeltaGram-win64-preview.zip
+          if-no-files-found: error
+          retention-days: 14

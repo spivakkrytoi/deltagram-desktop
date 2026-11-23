@@ -18,10 +18,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #endif // TDESKTOP_ALLOW_CLOSED_ALPHA
 
 // used in Updater.cpp and Setup.iss for Windows
-constexpr auto AppId = "{53F49750-6209-4FBF-9CA8-7A333C87D1ED}"_cs;
-constexpr auto AppNameOld = "Telegram Win (Unofficial)"_cs;
-constexpr auto AppName = "Telegram Desktop"_cs;
-constexpr auto AppFile = "Telegram"_cs;
+constexpr auto AppId = "{7C2F9E34-5B1A-4D8E-9F62-D3A1B8C4E507}"_cs;
+constexpr auto AppNameOld = "DeltaGram Win"_cs;
+constexpr auto AppName = "DeltaGram"_cs;
+constexpr auto AppFile = "DeltaGram"_cs;
 constexpr auto AppVersion = 7004006;
 constexpr auto AppVersionStr = "7.4.6";
 constexpr auto AppBetaVersion = false;
