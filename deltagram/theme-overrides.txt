@@ -1,0 +1,39 @@
+# DeltaGram graphite/rose desktop palette.
+# Source: upstream Telegram/Resources/night.tdesktop-theme.
+# This changes colours only. It does not claim to round or animate every button.
+windowBg: #242429;
+windowBgOver: #303036;
+windowBgRipple: #3b3339;
+windowFg: #f4eff0;
+windowFgOver: #ffffff;
+windowSubTextFg: #b8a9ad;
+windowSubTextFgOver: #d3c1c4;
+windowBoldFg: #fff6f6;
+windowBoldFgOver: #ffffff;
+windowBgActive: #923f52;
+windowActiveTextFg: #f19aaa;
+activeButtonBg: #a9475d;
+activeButtonBgOver: #bd596e;
+activeButtonBgRipple: #cf7285;
+activeButtonSecondaryFg: #ffdce3;
+activeLineFg: #df8194;
+lightButtonBg: #29292e;
+lightButtonBgOver: #383036;
+lightButtonBgRipple: #49343d;
+lightButtonFg: #f19aaa;
+outlineButtonBgOver: #363036;
+outlineButtonOutlineFg: #df8194;
+outlineButtonBgRipple: #49343d;
+menuBg: #27272d;
+menuBgRipple: #40343b;
+menuIconFg: #c6aeb4;
+menuSeparatorFg: #454047;
+dialogsBg: #242429;
+dialogsBgOver: #303036;
+dialogsBgActive: #753748;
+dialogsNameFg: #f4eff0;
+dialogsTextFg: #b8a9ad;
+dialogsTextFgOver: #d3c1c4;
+dialogsTextFgService: #ed9bab;
+dialogsTextFgServiceOver: #f4aebd;
+historyComposeAreaBg: #242429;
