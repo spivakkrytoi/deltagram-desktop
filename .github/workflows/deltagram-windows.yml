@@ -131,12 +131,19 @@ jobs:
             -D TDESKTOP_API_ID=%TDESKTOP_API_ID% ^
             -D TDESKTOP_API_HASH=%TDESKTOP_API_HASH% ^
             -D CMAKE_CONFIGURATION_TYPES=Debug ^
+            -D CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded ^
             -D DESKTOP_APP_ENABLE_LTO=OFF ^
             -D DESKTOP_APP_DISABLE_AUTOUPDATE=ON ^
             -D DESKTOP_APP_DISABLE_CRASH_REPORTS=ON
           if errorlevel 1 exit /b 1
-          cmake --build ..\out --config Debug --target Telegram --parallel 4
+          cmake --build ..\out --config Debug --target Telegram --parallel 2
           if errorlevel 1 exit /b 1
+
+      - name: Report disk after compilation
+        if: always()
+        shell: pwsh
+        run: |
+          Write-Host ('Free disk after compilation: {0:N1} GB' -f ((Get-PSDrive C).Free / 1GB))
 
       - name: Package preview executable
         shell: pwsh
