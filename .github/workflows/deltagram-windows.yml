@@ -22,6 +22,52 @@ jobs:
       TBUILD: ${{ github.workspace }}\TBuild
       LibrariesPath: ${{ github.workspace }}\TBuild\Libraries\win64
     steps:
+      # Upstream also clears preinstalled SDKs before building Qt. The stock
+      # runner ran out of space installing windeployqt.pdb on the first run.
+      # These are disposable tools on this ephemeral runner, not our sources
+      # or Visual Studio's active compiler/SDK.
+      - name: Free disk space for Qt
+        shell: pwsh
+        run: |
+          $before = (Get-PSDrive C).Free / 1GB
+          Get-Service docker -ErrorAction SilentlyContinue | Stop-Service -ErrorAction SilentlyContinue
+          wsl --shutdown 2> $null
+          $unused = @(
+            'C:\Android\android-sdk',
+            'C:\Program Files\dotnet',
+            'C:\Miniconda',
+            'C:\msys64',
+            "$env:USERPROFILE\.cargo",
+            "$env:USERPROFILE\.rustup",
+            "$env:LOCALAPPDATA\Docker",
+            'C:\ProgramData\DockerDesktop',
+            'C:\Program Files\PostgreSQL',
+            'C:\Program Files\MongoDB',
+            'C:\Program Files\MySQL',
+            'C:\ghcup',
+            'C:\cabal',
+            'C:\vcpkg',
+            'C:\Program Files\Google\Chrome',
+            'C:\Program Files (x86)\Google\Chrome',
+            'C:\Program Files\Mozilla Firefox',
+            'C:\ProgramData\Package Cache'
+          )
+          foreach ($path in $unused) {
+            Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue
+          }
+          # Build dependencies do not use installed Go/Ruby/JDK caches.
+          Get-ChildItem 'C:\hostedtoolcache\windows' -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -match '^(Go|Ruby|PyPy|Java_)' } |
+            Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+          # Keep Visual Studio's _Instances registration and the installed
+          # compiler/SDK; only remove downloadable installer package archives.
+          if ((Get-PSDrive C).Free / 1GB -lt 45) {
+            Get-ChildItem 'C:\ProgramData\Microsoft\VisualStudio\Packages' -Exclude _Instances -ErrorAction SilentlyContinue |
+              Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+          }
+          $after = (Get-PSDrive C).Free / 1GB
+          Write-Host ('Disk space for Qt: {0:N1} GB -> {1:N1} GB free' -f $before, $after)
+
       - name: Verify credentials exist
         shell: pwsh
         run: |
