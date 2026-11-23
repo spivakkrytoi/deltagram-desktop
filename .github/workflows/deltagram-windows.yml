@@ -115,29 +115,38 @@ jobs:
           set CARGO_INCREMENTAL=0
           call "%TBUILD%\%REPO_NAME%\Telegram\build\prepare\win.bat" skip-release silent
 
+      - name: Free Qt build sources after installation
+        shell: pwsh
+        run: |
+          # Preparation with skip-release installs Debug Qt. The checkout and
+          # intermediate objects are disposable once prepare.py succeeds.
+          $sources = Join-Path $env:LibrariesPath 'qt_6.12.0'
+          if (Test-Path $sources) { Remove-Item -LiteralPath $sources -Recurse -Force }
+          Write-Host ('Free before application build: {0:N1} GB' -f ((Get-PSDrive C).Free / 1GB))
+
       - name: Configure and build DeltaGram
         run: |
           cd /d "%TBUILD%\%REPO_NAME%\Telegram"
           call configure.bat x64 qt6 ^
             -D TDESKTOP_API_ID=%TDESKTOP_API_ID% ^
             -D TDESKTOP_API_HASH=%TDESKTOP_API_HASH% ^
-            -D CMAKE_CONFIGURATION_TYPES=Release ^
+            -D CMAKE_CONFIGURATION_TYPES=Debug ^
             -D DESKTOP_APP_ENABLE_LTO=OFF ^
             -D DESKTOP_APP_DISABLE_AUTOUPDATE=ON ^
             -D DESKTOP_APP_DISABLE_CRASH_REPORTS=ON
           if errorlevel 1 exit /b 1
-          cmake --build ..\out --config Release --target Telegram --parallel 4
+          cmake --build ..\out --config Debug --target Telegram --parallel 4
           if errorlevel 1 exit /b 1
 
       - name: Package preview executable
         shell: pwsh
         run: |
-          $binary = Join-Path $env:TBUILD "$env:REPO_NAME\out\Release\DeltaGram.exe"
+          $binary = Join-Path $env:TBUILD "$env:REPO_NAME\out\Debug\DeltaGram.exe"
           if (-not (Test-Path $binary)) { throw 'DeltaGram.exe was not built.' }
           New-Item -ItemType Directory -Force artifact | Out-Null
           Copy-Item $binary artifact\DeltaGram.exe
           $qt = Get-ChildItem "$env:LibrariesPath\qt6_*\bin\windeployqt.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
-          if ($qt) { & $qt.FullName --release --no-translations artifact\DeltaGram.exe; if ($LASTEXITCODE) { throw 'windeployqt failed' } }
+          if ($qt) { & $qt.FullName --debug --no-translations artifact\DeltaGram.exe; if ($LASTEXITCODE) { throw 'windeployqt failed' } }
           Compress-Archive -Path artifact\* -DestinationPath DeltaGram-win64-preview.zip
 
       - name: Upload Windows artifact
