@@ -133,6 +133,7 @@ jobs:
             -D CMAKE_CONFIGURATION_TYPES=Debug ^
             -D CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded ^
             -D CMAKE_CXX_FLAGS=/MP1 ^
+            -D DESKTOP_APP_DISABLE_TELEGRAM_PCH=ON ^
             -D DESKTOP_APP_ENABLE_LTO=OFF ^
             -D DESKTOP_APP_DISABLE_AUTOUPDATE=ON ^
             -D DESKTOP_APP_DISABLE_CRASH_REPORTS=ON
@@ -143,8 +144,8 @@ jobs:
         run: |
           $build = Join-Path $env:TBUILD "$env:REPO_NAME\out"
           # --parallel limits MSBuild projects, not necessarily cl.exe workers.
-          # /MP1 in the configure flags also caps compilation within a project;
-          # otherwise the runner exhausts commit memory loading Telegram's PCH.
+          # /MP1 caps compiler workers inside a project. Telegram builds without
+          # its PCH in this preview because mapping it exhausted runner commit.
           & cmake --build $build --config Debug --target Telegram --parallel 1 2>&1 |
             Tee-Object -FilePath (Join-Path $build 'deltagram-build.log')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
