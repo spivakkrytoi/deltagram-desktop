@@ -124,6 +124,30 @@ jobs:
           if (Test-Path $sources) { Remove-Item -LiteralPath $sources -Recurse -Force }
           Write-Host ('Free before application build: {0:N1} GB' -f ((Get-PSDrive C).Free / 1GB))
 
+      - name: Check disk for compiler pagefile
+        shell: pwsh
+        run: |
+          $free = (Get-PSDrive C).Free / 1GB
+          if ($free -lt 32) { throw "Need at least 32 GB free on C: before allocating a 16 GB compiler pagefile; found $([math]::Round($free, 1)) GB." }
+
+      - name: Allocate compiler pagefile
+        uses: al-cheb/configure-pagefile-action@9b6da52fb72a3c6147c1aad2df22d8d905681adc # v1.5
+        with:
+          minimum-size: 16GB
+          maximum-size: 16GB
+          disk-root: "C:"
+
+      - name: Verify available compiler memory
+        shell: pwsh
+        run: |
+          $os = Get-CimInstance Win32_OperatingSystem
+          $pagefiles = Get-CimInstance Win32_PageFileUsage
+          $pagefiles | Format-Table Name, AllocatedBaseSize, CurrentUsage
+          $commitGB = $os.TotalVirtualMemorySize / 1MB
+          $freeGB = (Get-PSDrive C).Free / 1GB
+          Write-Host ('Commit limit: {0:N1} GB; disk free: {1:N1} GB' -f $commitGB, $freeGB)
+          if ($commitGB -lt 20 -or $freeGB -lt 15) { throw 'Compiler memory or disk headroom is insufficient after pagefile allocation.' }
+
       - name: Configure DeltaGram
         run: |
           cd /d "%TBUILD%\%REPO_NAME%\Telegram"
@@ -131,9 +155,8 @@ jobs:
             -D TDESKTOP_API_ID=%TDESKTOP_API_ID% ^
             -D TDESKTOP_API_HASH=%TDESKTOP_API_HASH% ^
             -D CMAKE_CONFIGURATION_TYPES=Debug ^
-            -D CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded ^
+            -D CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=ProgramDatabase ^
             -D CMAKE_CXX_FLAGS=/MP1 ^
-            -D DESKTOP_APP_DISABLE_TELEGRAM_PCH=ON ^
             -D DESKTOP_APP_ENABLE_LTO=OFF ^
             -D DESKTOP_APP_DISABLE_AUTOUPDATE=ON ^
             -D DESKTOP_APP_DISABLE_CRASH_REPORTS=ON
@@ -144,8 +167,8 @@ jobs:
         run: |
           $build = Join-Path $env:TBUILD "$env:REPO_NAME\out"
           # --parallel limits MSBuild projects, not necessarily cl.exe workers.
-          # /MP1 caps compiler workers inside a project. Telegram builds without
-          # its PCH in this preview because mapping it exhausted runner commit.
+          # /MP1 caps compiler workers inside a project; the pagefile increases
+          # commit capacity for loading Telegram's precompiled headers.
           & cmake --build $build --config Debug --target Telegram --parallel 1 2>&1 |
             Tee-Object -FilePath (Join-Path $build 'deltagram-build.log')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
