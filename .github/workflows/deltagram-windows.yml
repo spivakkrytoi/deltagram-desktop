@@ -142,6 +142,11 @@ jobs:
           if ($free -lt 32) { throw "Need at least 32 GB free on C: before allocating a 12 GB compiler pagefile; found $([math]::Round($free, 1)) GB." }
 
       - name: Allocate compiler pagefile
+        # v1.5 intermittently throws "SetPageFileSize ... The operation completed
+        # successfully" (a Win32Exception with code 0) even though the resize
+        # may have been applied. Do not abort on that error: the next step waits
+        # for the new commit limit and retries the resize itself.
+        continue-on-error: true
         uses: al-cheb/configure-pagefile-action@9b6da52fb72a3c6147c1aad2df22d8d905681adc # v1.5
         with:
           minimum-size: 12GB
@@ -151,13 +156,36 @@ jobs:
       - name: Verify available compiler memory
         shell: pwsh
         run: |
-          $os = Get-CimInstance Win32_OperatingSystem
-          $pagefiles = Get-CimInstance Win32_PageFileUsage
-          $pagefiles | Format-Table Name, AllocatedBaseSize, CurrentUsage
-          $commitGB = $os.TotalVirtualMemorySize / 1MB
+          function Get-CommitGB {
+            [math]::Round((Get-CimInstance Win32_OperatingSystem).TotalVirtualMemorySize / 1MB, 1)
+          }
+          $sizeMB = 12288
+          $targetGB = 26
+          for ($attempt = 1; $attempt -le 12; $attempt++) {
+            $commitGB = Get-CommitGB
+            Write-Host ('Attempt {0}: commit limit {1:N1} GB' -f $attempt, $commitGB)
+            if ($commitGB -ge $targetGB) { break }
+            # A resize can take a moment to surface in TotalVirtualMemorySize;
+            # retry the WMI update and wait instead of failing the whole run.
+            try {
+              $pf = Get-CimInstance Win32_PageFileSetting -Filter "Name='C:\\pagefile.sys'"
+              if ($pf) {
+                Set-CimInstance -InputObject $pf -Property @{ InitialSize = $sizeMB; MaximumSize = $sizeMB } -ErrorAction Stop | Out-Null
+              } else {
+                New-CimInstance -ClassName Win32_PageFileSetting -Property @{ Name = 'C:\pagefile.sys'; InitialSize = $sizeMB; MaximumSize = $sizeMB } -ErrorAction Stop | Out-Null
+              }
+            } catch {
+              Write-Warning ('Pagefile update attempt {0} failed: {1}' -f $attempt, $_.Exception.Message)
+            }
+            Start-Sleep -Seconds 20
+          }
+          Get-CimInstance Win32_PageFileUsage | Format-Table Name, AllocatedBaseSize, CurrentUsage
+          $commitGB = Get-CommitGB
           $freeGB = (Get-PSDrive C).Free / 1GB
           Write-Host ('Commit limit: {0:N1} GB; disk free: {1:N1} GB' -f $commitGB, $freeGB)
-          if ($commitGB -lt 26 -or $freeGB -lt 22) { throw 'Compiler memory or disk headroom is insufficient after pagefile allocation.' }
+          if ($commitGB -lt $targetGB -or $freeGB -lt 22) {
+            throw 'Compiler memory or disk headroom is insufficient after pagefile allocation.'
+          }
 
       - name: Configure DeltaGram
         run: |
