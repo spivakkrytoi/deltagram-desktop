@@ -262,8 +262,11 @@ jobs:
           }
           New-Item -ItemType Directory -Force artifact | Out-Null
           Copy-Item $binary artifact\DeltaGram.exe
-          $qt = Get-ChildItem "$env:LibrariesPath\Qt-*\bin\windeployqt.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
-          if ($qt) { & $qt.FullName --debug --no-translations artifact\DeltaGram.exe; if ($LASTEXITCODE) { throw 'windeployqt failed' } }
+          # prepare.py builds Qt with -static -static-runtime, so DeltaGram.exe
+          # imports no Qt DLLs. windeployqt sees a valid PE file but correctly
+          # reports "does not seem to be a Qt executable" and exits 1. That is
+          # expected for this configuration, not a packaging failure; the
+          # executable is already self-contained.
           Compress-Archive -Path artifact\* -DestinationPath DeltaGram-win64-preview.zip
 
       - name: Upload Windows artifact
