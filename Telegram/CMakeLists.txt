@@ -6,10 +6,6 @@
 
 add_executable(Telegram WIN32 MACOSX_BUNDLE)
 init_non_host_target(Telegram)
-if (WIN32)
-    # Preserve the upstream CMake target while emitting a distinct application.
-    set_target_properties(Telegram PROPERTIES OUTPUT_NAME "DeltaGram")
-endif()
 
 add_subdirectory(lib_rpl)
 add_subdirectory(lib_crl)
@@ -2992,6 +2988,13 @@ else()
     endif()
     set(bundle_entitlements "Telegram.entitlements")
     set(output_name "Telegram")
+endif()
+
+# Set the Windows binary name after the platform branches: the common
+# set_target_properties call below would otherwise overwrite an earlier
+# OUTPUT_NAME and produce Telegram.exe instead of DeltaGram.exe.
+if (WIN32)
+    set(output_name "DeltaGram")
 endif()
 
 if (CMAKE_GENERATOR STREQUAL Xcode)

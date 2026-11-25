@@ -242,11 +242,24 @@ jobs:
         run: |
           Write-Host ('Free disk after compilation: {0:N1} GB' -f ((Get-PSDrive C).Free / 1GB))
 
+      - name: Free compiled objects before packaging
+        shell: pwsh
+        run: |
+          # The linked executable is complete. These generated MSVC objects
+          # are not needed by windeployqt or the downloadable preview archive.
+          $objects = Join-Path $env:TBUILD "$env:REPO_NAME\out\Telegram\Telegram.dir\Debug"
+          if (Test-Path $objects) { Remove-Item -LiteralPath $objects -Recurse -Force }
+          Write-Host ('Free for packaging: {0:N1} GB' -f ((Get-PSDrive C).Free / 1GB))
+
       - name: Package preview executable
         shell: pwsh
         run: |
           $binary = Join-Path $env:TBUILD "$env:REPO_NAME\out\Debug\DeltaGram.exe"
-          if (-not (Test-Path $binary)) { throw 'DeltaGram.exe was not built.' }
+          if (-not (Test-Path $binary)) {
+            $produced = Get-ChildItem (Join-Path $env:TBUILD "$env:REPO_NAME\out\Debug") -Filter *.exe -ErrorAction SilentlyContinue |
+              Select-Object -ExpandProperty Name
+            throw "Expected DeltaGram.exe after the Telegram CMake target build; found: $($produced -join ', ')"
+          }
           New-Item -ItemType Directory -Force artifact | Out-Null
           Copy-Item $binary artifact\DeltaGram.exe
           $qt = Get-ChildItem "$env:LibrariesPath\Qt-*\bin\windeployqt.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
