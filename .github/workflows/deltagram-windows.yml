@@ -151,15 +151,25 @@ jobs:
       - name: Configure DeltaGram
         run: |
           cd /d "%TBUILD%\%REPO_NAME%\Telegram"
+          rem The preview is distributed without symbols. ProgramDatabase
+          rem filled C: with vc143.pdb (C2471/C1033) before linking. Keep the
+          rem Debug Qt libraries, but disable compiler and linker debug info.
           call configure.bat x64 qt6 ^
             -D TDESKTOP_API_ID=%TDESKTOP_API_ID% ^
             -D TDESKTOP_API_HASH=%TDESKTOP_API_HASH% ^
             -D CMAKE_CONFIGURATION_TYPES=Debug ^
-            -D CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=ProgramDatabase ^
+            -D CMAKE_MSVC_DEBUG_INFORMATION_FORMAT= ^
+            -D "CMAKE_CXX_FLAGS_DEBUG=/MDd /Od" ^
+            -D "CMAKE_C_FLAGS_DEBUG=/MDd /Od" ^
+            -D CMAKE_EXE_LINKER_FLAGS_DEBUG=/INCREMENTAL:NO ^
+            -D CMAKE_SHARED_LINKER_FLAGS_DEBUG=/INCREMENTAL:NO ^
             -D CMAKE_CXX_FLAGS=/MP1 ^
             -D DESKTOP_APP_ENABLE_LTO=OFF ^
             -D DESKTOP_APP_DISABLE_AUTOUPDATE=ON ^
             -D DESKTOP_APP_DISABLE_CRASH_REPORTS=ON
+          if errorlevel 1 exit /b 1
+          findstr /c:"CMAKE_MSVC_DEBUG_INFORMATION_FORMAT:" ..\out\CMakeCache.txt
+          findstr /c:"CMAKE_CXX_FLAGS_DEBUG:" ..\out\CMakeCache.txt
           if errorlevel 1 exit /b 1
 
       - name: Build DeltaGram
