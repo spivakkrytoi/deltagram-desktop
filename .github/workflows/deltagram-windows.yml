@@ -124,17 +124,28 @@ jobs:
           if (Test-Path $sources) { Remove-Item -LiteralPath $sources -Recurse -Force }
           Write-Host ('Free before application build: {0:N1} GB' -f ((Get-PSDrive C).Free / 1GB))
 
+      - name: Compress prepared libraries
+        shell: pwsh
+        run: |
+          # Prepared Qt and other library files reside on C: through the TBuild
+          # junction. Keep them, but store them compressed to leave room for
+          # Telegram's large object files on the same volume.
+          $path = Join-Path $env:USERPROFILE 'TBuild\Libraries\win64'
+          & compact.exe /C "/S:$path" /I /Q
+          if ($LASTEXITCODE -ne 0) { throw "NTFS compression failed: $LASTEXITCODE" }
+          Write-Host ('Free after library compression: {0:N1} GB' -f ((Get-PSDrive C).Free / 1GB))
+
       - name: Check disk for compiler pagefile
         shell: pwsh
         run: |
           $free = (Get-PSDrive C).Free / 1GB
-          if ($free -lt 32) { throw "Need at least 32 GB free on C: before allocating a 16 GB compiler pagefile; found $([math]::Round($free, 1)) GB." }
+          if ($free -lt 32) { throw "Need at least 32 GB free on C: before allocating a 12 GB compiler pagefile; found $([math]::Round($free, 1)) GB." }
 
       - name: Allocate compiler pagefile
         uses: al-cheb/configure-pagefile-action@9b6da52fb72a3c6147c1aad2df22d8d905681adc # v1.5
         with:
-          minimum-size: 16GB
-          maximum-size: 16GB
+          minimum-size: 12GB
+          maximum-size: 12GB
           disk-root: "C:"
 
       - name: Verify available compiler memory
@@ -146,7 +157,7 @@ jobs:
           $commitGB = $os.TotalVirtualMemorySize / 1MB
           $freeGB = (Get-PSDrive C).Free / 1GB
           Write-Host ('Commit limit: {0:N1} GB; disk free: {1:N1} GB' -f $commitGB, $freeGB)
-          if ($commitGB -lt 20 -or $freeGB -lt 15) { throw 'Compiler memory or disk headroom is insufficient after pagefile allocation.' }
+          if ($commitGB -lt 26 -or $freeGB -lt 22) { throw 'Compiler memory or disk headroom is insufficient after pagefile allocation.' }
 
       - name: Configure DeltaGram
         run: |
@@ -171,6 +182,25 @@ jobs:
           findstr /c:"CMAKE_MSVC_DEBUG_INFORMATION_FORMAT:" ..\out\CMakeCache.txt
           findstr /c:"CMAKE_CXX_FLAGS_DEBUG:" ..\out\CMakeCache.txt
           if errorlevel 1 exit /b 1
+
+      - name: Compress compiler output directory
+        shell: pwsh
+        run: |
+          # NTFS compression on the directory is inherited by new .obj files.
+          # This preview does not package intermediate objects or debug symbols.
+          $build = Join-Path $env:USERPROFILE "TBuild\$env:REPO_NAME\out"
+          & compact.exe /C "/S:$build" /I /Q
+          if ($LASTEXITCODE -ne 0) { throw "NTFS compression failed: $LASTEXITCODE" }
+          if (-not ((Get-Item -LiteralPath $build).Attributes -band [IO.FileAttributes]::Compressed)) {
+            & compact.exe /C $build /I /Q
+            if ($LASTEXITCODE -ne 0) { throw "Could not mark build directory for compression." }
+          }
+          if (-not ((Get-Item -LiteralPath $build).Attributes -band [IO.FileAttributes]::Compressed)) {
+            throw 'New compiler objects would not inherit NTFS compression.'
+          }
+          $free = (Get-PSDrive C).Free / 1GB
+          Write-Host ('Free before compiler: {0:N1} GB' -f $free)
+          if ($free -lt 23) { throw "Insufficient space for application objects: $([math]::Round($free, 1)) GB." }
 
       - name: Build DeltaGram
         shell: pwsh
