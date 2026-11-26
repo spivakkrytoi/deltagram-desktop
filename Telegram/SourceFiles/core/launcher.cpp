@@ -343,7 +343,8 @@ void Launcher::init() {
 	prepareSettings();
 	initQtMessageLogging();
 
-	QApplication::setApplicationName(u"DeltaGramDesktop"_q);
+	QApplication::setApplicationName(u"DeltaGram"_q);
+	QApplication::setApplicationDisplayName(u"DeltaGram"_q);
 
 #if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
 	// fallback session management is useless for tdesktop since it doesn't have

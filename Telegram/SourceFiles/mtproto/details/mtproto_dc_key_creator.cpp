@@ -526,7 +526,16 @@ void DcKeyCreator::pqAnswered(
 			_dcId,
 			data.vserver_public_key_fingerprints().v);
 		if (!rsaKey.valid()) {
-			DEBUG_LOG(("AuthKey Error: unknown public key."));
+			// Fingerprints are public metadata from resPQ. Log them in the
+			// regular log to distinguish a stale DC from a mismatched key.
+			LOG(("AuthKey Error: no matching RSA key for dc %1; "
+				"expected DeltaGram fingerprint -7080122280541503745."
+			).arg(_dcId));
+			for (const auto &fingerprint
+					: data.vserver_public_key_fingerprints().v) {
+				LOG(("AuthKey Info: server offered RSA fingerprint %1."
+				).arg(fingerprint.v));
+			}
 			return failed(DcKeyError::UnknownPublicKey);
 		}
 

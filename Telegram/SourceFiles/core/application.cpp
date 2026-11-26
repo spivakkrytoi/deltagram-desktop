@@ -566,7 +566,15 @@ void Application::startDomain() {
 void Application::startSettingsAndBackground() {
 	Local::rewriteSettingsIfNeeded();
 	Window::Theme::Background()->start();
-	checkSystemDarkMode();
+	// Use the bundled DeltaGram palette before the first window is shown,
+	// including when an older tdata directory has a light theme saved.
+	// Following the system theme could immediately undo this startup choice.
+	settings().setSystemDarkModeEnabled(false);
+	if (!Window::Theme::IsNightMode()) {
+		Window::Theme::ToggleNightMode();
+	}
+	Window::Theme::ApplyDefaultWithPath(Window::Theme::NightThemePath());
+	Window::Theme::KeepApplied();
 	Ui::SetScreenReaderModeDisabled(
 		settings().readPref<bool>(kScreenReaderModeDisabledKey));
 }
