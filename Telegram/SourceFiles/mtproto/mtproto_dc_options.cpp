@@ -29,7 +29,7 @@ struct BuiltInDc {
 };
 
 const BuiltInDc kBuiltInDcs[] = {
-	// DeltaGram bootstrap endpoint; the server provides the full DC list.
+	// The DeltaGram server has a single DC. Never merge Telegram endpoints.
 	{ 2, "150.241.69.39", 2398 },
 };
 
@@ -150,45 +150,10 @@ void DcOptions::constructFromBuiltIn() {
 void DcOptions::processFromList(
 		const QVector<MTPDcOption> &options,
 		bool overwrite) {
-	if (options.empty() || _immutable) {
-		return;
-	}
-
-	auto data = [&] {
-		if (overwrite) {
-			return base::flat_map<DcId, std::vector<Endpoint>>();
-		}
-		ReadLocker lock(this);
-		return _data;
-	}();
-	for (auto &mtpOption : options) {
-		if (mtpOption.type() != mtpc_dcOption) {
-			LOG(("Wrong type in DcOptions: %1").arg(mtpOption.type()));
-			continue;
-		}
-
-		const auto &option = mtpOption.c_dcOption();
-		auto dcId = option.vid().v;
-		auto flags = option.vflags().v;
-		auto ip = std::string(
-			option.vip_address().v.constData(),
-			option.vip_address().v.size());
-		auto port = option.vport().v;
-		auto secret = bytes::make_vector(option.vsecret().value_or_empty());
-		ApplyOneOption(data, dcId, flags, ip, port, secret);
-	}
-
-	const auto difference = [&] {
-		WriteLocker lock(this);
-		auto result = CountOptionsDifference(_data, data);
-		if (!result.empty()) {
-			_data = std::move(data);
-		}
-		return result;
-	}();
-	for (const auto dcId : difference) {
-		_changed.fire_copy(dcId);
-	}
+	// Server and cached config must not redirect a DeltaGram client to a
+	// Telegram DC. The single built-in endpoint is the routing authority.
+	(void)options;
+	(void)overwrite;
 }
 
 void DcOptions::setFromList(const MTPVector<MTPDcOption> &options) {
@@ -200,49 +165,8 @@ void DcOptions::addFromList(const MTPVector<MTPDcOption> &options) {
 }
 
 void DcOptions::addFromOther(DcOptions &&options) {
-	if (this == &options || _immutable) {
-		return;
-	}
-
-	auto idsChanged = std::vector<DcId>();
-	{
-		ReadLocker lock(&options);
-		if (options._data.empty()) {
-			return;
-		}
-
-		idsChanged.reserve(options._data.size());
-		{
-			WriteLocker lock(this);
-			const auto changed = [&](const std::vector<Endpoint> &list) {
-				auto result = false;
-				for (const auto &endpoint : list) {
-					const auto dcId = endpoint.id;
-					const auto flags = endpoint.flags;
-					const auto &ip = endpoint.ip;
-					const auto port = endpoint.port;
-					const auto &secret = endpoint.secret;
-					if (applyOneGuarded(dcId, flags, ip, port, secret)) {
-						result = true;
-					}
-				}
-				return result;
-			};
-			for (const auto &item : base::take(options._data)) {
-				if (changed(item.second)) {
-					idsChanged.push_back(item.first);
-				}
-			}
-			for (auto &item : options._cdnPublicKeys) {
-				for (auto &entry : item.second) {
-					_cdnPublicKeys[item.first].insert(std::move(entry));
-				}
-			}
-		}
-	}
-	for (const auto dcId : idsChanged) {
-		_changed.fire_copy(dcId);
-	}
+	// Legacy fallback config may contain Telegram DCs from an older install.
+	(void)options;
 }
 
 void DcOptions::constructAddOne(
@@ -251,8 +175,12 @@ void DcOptions::constructAddOne(
 		const std::string &ip,
 		int port,
 		const bytes::vector &secret) {
-	WriteLocker lock(this);
-	applyOneGuarded(BareDcId(id), flags, ip, port, secret);
+	// Do not let special-config DNS or legacy settings add external endpoints.
+	(void)id;
+	(void)flags;
+	(void)ip;
+	(void)port;
+	(void)secret;
 }
 
 bool DcOptions::applyOneGuarded(
@@ -448,6 +376,7 @@ bool DcOptions::constructFromSerialized(const QByteArray &serialized) {
 
 	WriteLocker lock(this);
 	_data.clear();
+	auto discarded = 0;
 	for (auto i = 0; i != count; ++i) {
 		qint32 id = 0, flags = 0, port = 0, ipSize = 0;
 		stream >> id >> flags >> port >> ipSize;
@@ -483,12 +412,7 @@ bool DcOptions::constructFromSerialized(const QByteArray &serialized) {
 			return false;
 		}
 
-		applyOneGuarded(
-			DcId(id),
-			Flags::from_raw(flags),
-			ip,
-			port,
-			secret);
+		++discarded;
 	}
 
 	// Read CDN config
@@ -517,6 +441,23 @@ bool DcOptions::constructFromSerialized(const QByteArray &serialized) {
 				return false;
 			}
 		}
+	}
+	// Parsing the old settings preserves the remainder of the config and
+	// tdata, but none of its endpoints are trusted for new connections.
+	_data.clear();
+	for (const auto &entry : kBuiltInDcs) {
+		applyOneGuarded(
+			entry.id,
+			Flag::f_static | 0,
+			entry.ip,
+			entry.port,
+			{});
+	}
+	if (discarded) {
+		LOG(("MTP Info: ignored %1 saved DC endpoints; using DeltaGram DC 2 %2:%3"
+			).arg(discarded
+			).arg(kBuiltInDcs[0].ip
+			).arg(kBuiltInDcs[0].port));
 	}
 	return true;
 }
