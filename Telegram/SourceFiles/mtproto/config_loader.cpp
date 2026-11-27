@@ -116,14 +116,9 @@ void ConfigLoader::enumerate() {
 }
 
 void ConfigLoader::refreshSpecialLoader() {
-	if (_proxyEnabled || _instance->isKeysDestroyer()) {
-		_specialLoader.reset();
-		return;
-	}
-	if (!_specialLoader
-		|| (!_specialEnumRequest && _specialEndpoints.empty())) {
-		createSpecialLoader();
-	}
+	// Telegram's DNS fallback publishes Telegram DCs. DeltaGram's endpoint is
+	// pinned in DcOptions and must never be replaced by this mechanism.
+	_specialLoader.reset();
 }
 
 void ConfigLoader::setPhone(const QString &phone) {

@@ -1,0 +1,308 @@
+name: DeltaGram Windows preview
+
+# Manual preview builds avoid starting upstream's large Windows/Linux/macOS
+# matrices on every source push. No build is advertised as feature-complete.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  win64:
+    runs-on: windows-latest
+    timeout-minutes: 360
+    defaults:
+      run:
+        shell: cmd
+    env:
+      TDESKTOP_API_ID: ${{ secrets.TDESKTOP_API_ID }}
+      TDESKTOP_API_HASH: ${{ secrets.TDESKTOP_API_HASH }}
+      REPO_NAME: deltagram-desktop
+      TBUILD: ${{ github.workspace }}\TBuild
+      LibrariesPath: ${{ github.workspace }}\TBuild\Libraries\win64
+    steps:
+      # Upstream also clears preinstalled SDKs before building Qt. The stock
+      # runner ran out of space installing windeployqt.pdb on the first run.
+      # These are disposable tools on this ephemeral runner, not our sources
+      # or Visual Studio's active compiler/SDK.
+      - name: Free disk space for Qt
+        shell: pwsh
+        run: |
+          $before = (Get-PSDrive C).Free / 1GB
+          Get-Service docker -ErrorAction SilentlyContinue | Stop-Service -ErrorAction SilentlyContinue
+          wsl --shutdown 2> $null
+          $unused = @(
+            'C:\Android\android-sdk',
+            'C:\Program Files\dotnet',
+            'C:\Miniconda',
+            'C:\msys64',
+            "$env:USERPROFILE\.cargo",
+            "$env:USERPROFILE\.rustup",
+            "$env:LOCALAPPDATA\Docker",
+            'C:\ProgramData\DockerDesktop',
+            'C:\Program Files\PostgreSQL',
+            'C:\Program Files\MongoDB',
+            'C:\Program Files\MySQL',
+            'C:\ghcup',
+            'C:\cabal',
+            'C:\vcpkg',
+            'C:\Program Files\Google\Chrome',
+            'C:\Program Files (x86)\Google\Chrome',
+            'C:\Program Files\Mozilla Firefox',
+            'C:\ProgramData\Package Cache'
+          )
+          foreach ($path in $unused) {
+            Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue
+          }
+          # Build dependencies do not use installed Go/Ruby/JDK caches.
+          Get-ChildItem 'C:\hostedtoolcache\windows' -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -match '^(Go|Ruby|PyPy|Java_)' } |
+            Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+          # Keep Visual Studio's _Instances registration and the installed
+          # compiler/SDK; only remove downloadable installer package archives.
+          if ((Get-PSDrive C).Free / 1GB -lt 45) {
+            Get-ChildItem 'C:\ProgramData\Microsoft\VisualStudio\Packages' -Exclude _Instances -ErrorAction SilentlyContinue |
+              Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+          }
+          $after = (Get-PSDrive C).Free / 1GB
+          Write-Host ('Disk space for Qt: {0:N1} GB -> {1:N1} GB free' -f $before, $after)
+
+      - name: Verify credentials exist
+        shell: pwsh
+        run: |
+          if (-not $env:TDESKTOP_API_ID -or -not $env:TDESKTOP_API_HASH) {
+            throw 'Set TDESKTOP_API_ID and TDESKTOP_API_HASH in repository Actions secrets.'
+          }
+
+      - name: Prepare build directories
+        run: |
+          mkdir %USERPROFILE%\TBuild\Libraries
+          mklink /d "%TBUILD%" "%USERPROFILE%\TBuild"
+
+      - name: Checkout complete source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          submodules: recursive
+          path: TBuild/deltagram-desktop
+
+      - name: Select compiler and Windows SDK
+        uses: Eden-CI/msvc-dev-cmd@1bd71f95d6f3d1b2b3395b335cc63bcdc90cf223
+        with:
+          arch: x64
+          sdk: 10.0.26100.0
+          toolset: 14.44
+
+      - name: Configure NuGet
+        run: |
+          nuget sources Disable -Name "Microsoft Visual Studio Offline Packages"
+          nuget sources Add -Source https://api.nuget.org/v3/index.json & exit 0
+
+      - name: Cache third-party build tools
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ${{ env.TBUILD }}\ThirdParty
+          key: desktop-thirdparty-${{ hashFiles('TBuild/deltagram-desktop/Telegram/build/prepare/prepare.py') }}
+
+      - name: Cache prepared libraries
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ${{ env.LibrariesPath }}
+          key: desktop-win64-libraries-${{ hashFiles('TBuild/deltagram-desktop/Telegram/build/prepare/prepare.py') }}
+
+      - name: Prepare libraries
+        run: |
+          set CARGO_INCREMENTAL=0
+          call "%TBUILD%\%REPO_NAME%\Telegram\build\prepare\win.bat" skip-release silent
+
+      - name: Free Qt build sources after installation
+        shell: pwsh
+        run: |
+          # Preparation with skip-release installs Debug Qt. The checkout and
+          # intermediate objects are disposable once prepare.py succeeds.
+          $sources = Join-Path $env:LibrariesPath 'qt_6.12.0'
+          if (Test-Path $sources) { Remove-Item -LiteralPath $sources -Recurse -Force }
+          Write-Host ('Free before application build: {0:N1} GB' -f ((Get-PSDrive C).Free / 1GB))
+
+      - name: Compress prepared libraries
+        shell: pwsh
+        run: |
+          # Prepared Qt and other library files reside on C: through the TBuild
+          # junction. Keep them, but store them compressed to leave room for
+          # Telegram's large object files on the same volume.
+          $path = Join-Path $env:USERPROFILE 'TBuild\Libraries\win64'
+          & compact.exe /C "/S:$path" /I /Q
+          if ($LASTEXITCODE -ne 0) { throw "NTFS compression failed: $LASTEXITCODE" }
+          Write-Host ('Free after library compression: {0:N1} GB' -f ((Get-PSDrive C).Free / 1GB))
+
+      - name: Check disk for compiler pagefile
+        shell: pwsh
+        run: |
+          $free = (Get-PSDrive C).Free / 1GB
+          if ($free -lt 32) { throw "Need at least 32 GB free on C: before allocating a 12 GB compiler pagefile; found $([math]::Round($free, 1)) GB." }
+
+      - name: Allocate compiler pagefile
+        # v1.5 intermittently throws "SetPageFileSize ... The operation completed
+        # successfully" (a Win32Exception with code 0) even though the resize
+        # may have been applied. Do not abort on that error: the next step waits
+        # for the new commit limit and retries the resize itself.
+        continue-on-error: true
+        uses: al-cheb/configure-pagefile-action@9b6da52fb72a3c6147c1aad2df22d8d905681adc # v1.5
+        with:
+          minimum-size: 12GB
+          maximum-size: 12GB
+          disk-root: "C:"
+
+      - name: Verify available compiler memory
+        shell: pwsh
+        run: |
+          function Get-CommitGB {
+            [math]::Round((Get-CimInstance Win32_OperatingSystem).TotalVirtualMemorySize / 1MB, 1)
+          }
+          $sizeMB = 12288
+          $targetGB = 26
+          for ($attempt = 1; $attempt -le 12; $attempt++) {
+            $commitGB = Get-CommitGB
+            Write-Host ('Attempt {0}: commit limit {1:N1} GB' -f $attempt, $commitGB)
+            if ($commitGB -ge $targetGB) { break }
+            # A resize can take a moment to surface in TotalVirtualMemorySize;
+            # retry the WMI update and wait instead of failing the whole run.
+            try {
+              $pf = Get-CimInstance Win32_PageFileSetting -Filter "Name='C:\\pagefile.sys'"
+              if ($pf) {
+                Set-CimInstance -InputObject $pf -Property @{ InitialSize = $sizeMB; MaximumSize = $sizeMB } -ErrorAction Stop | Out-Null
+              } else {
+                New-CimInstance -ClassName Win32_PageFileSetting -Property @{ Name = 'C:\pagefile.sys'; InitialSize = $sizeMB; MaximumSize = $sizeMB } -ErrorAction Stop | Out-Null
+              }
+            } catch {
+              Write-Warning ('Pagefile update attempt {0} failed: {1}' -f $attempt, $_.Exception.Message)
+            }
+            Start-Sleep -Seconds 20
+          }
+          Get-CimInstance Win32_PageFileUsage | Format-Table Name, AllocatedBaseSize, CurrentUsage
+          $commitGB = Get-CommitGB
+          $freeGB = (Get-PSDrive C).Free / 1GB
+          Write-Host ('Commit limit: {0:N1} GB; disk free: {1:N1} GB' -f $commitGB, $freeGB)
+          if ($commitGB -lt $targetGB -or $freeGB -lt 22) {
+            throw 'Compiler memory or disk headroom is insufficient after pagefile allocation.'
+          }
+
+      - name: Configure DeltaGram
+        run: |
+          cd /d "%TBUILD%\%REPO_NAME%\Telegram"
+          rem The preview is distributed without symbols. ProgramDatabase
+          rem filled C: with vc143.pdb (C2471/C1033) before linking. Keep the
+          rem Debug Qt libraries, but disable compiler and linker debug info.
+          call configure.bat x64 qt6 ^
+            -D TDESKTOP_API_ID=%TDESKTOP_API_ID% ^
+            -D TDESKTOP_API_HASH=%TDESKTOP_API_HASH% ^
+            -D CMAKE_CONFIGURATION_TYPES=Debug ^
+            -D CMAKE_MSVC_DEBUG_INFORMATION_FORMAT= ^
+            -D "CMAKE_CXX_FLAGS_DEBUG=/MDd /Od" ^
+            -D "CMAKE_C_FLAGS_DEBUG=/MDd /Od" ^
+            -D CMAKE_EXE_LINKER_FLAGS_DEBUG=/INCREMENTAL:NO ^
+            -D CMAKE_SHARED_LINKER_FLAGS_DEBUG=/INCREMENTAL:NO ^
+            -D CMAKE_CXX_FLAGS=/MP1 ^
+            -D DESKTOP_APP_ENABLE_LTO=OFF ^
+            -D DESKTOP_APP_DISABLE_AUTOUPDATE=ON ^
+            -D DESKTOP_APP_DISABLE_CRASH_REPORTS=ON
+          if errorlevel 1 exit /b 1
+          findstr /c:"CMAKE_MSVC_DEBUG_INFORMATION_FORMAT:" ..\out\CMakeCache.txt
+          findstr /c:"CMAKE_CXX_FLAGS_DEBUG:" ..\out\CMakeCache.txt
+          if errorlevel 1 exit /b 1
+
+      - name: Compress compiler output directory
+        shell: pwsh
+        run: |
+          # NTFS compression on the directory is inherited by new .obj files.
+          # This preview does not package intermediate objects or debug symbols.
+          $build = Join-Path $env:USERPROFILE "TBuild\$env:REPO_NAME\out"
+          & compact.exe /C "/S:$build" /I /Q
+          if ($LASTEXITCODE -ne 0) { throw "NTFS compression failed: $LASTEXITCODE" }
+          if (-not ((Get-Item -LiteralPath $build).Attributes -band [IO.FileAttributes]::Compressed)) {
+            & compact.exe /C $build /I /Q
+            if ($LASTEXITCODE -ne 0) { throw "Could not mark build directory for compression." }
+          }
+          if (-not ((Get-Item -LiteralPath $build).Attributes -band [IO.FileAttributes]::Compressed)) {
+            throw 'New compiler objects would not inherit NTFS compression.'
+          }
+          $free = (Get-PSDrive C).Free / 1GB
+          Write-Host ('Free before compiler: {0:N1} GB' -f $free)
+          if ($free -lt 23) { throw "Insufficient space for application objects: $([math]::Round($free, 1)) GB." }
+
+      - name: Build DeltaGram
+        shell: pwsh
+        run: |
+          $build = Join-Path $env:TBUILD "$env:REPO_NAME\out"
+          # --parallel limits MSBuild projects, not necessarily cl.exe workers.
+          # /MP1 caps compiler workers inside a project; the pagefile increases
+          # commit capacity for loading Telegram's precompiled headers.
+          & cmake --build $build --config Debug --target Telegram --parallel 1 2>&1 |
+            Tee-Object -FilePath (Join-Path $build 'deltagram-build.log')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      # GitHub's public check annotations show only "exit code 1" for a failed
+      # compiler step. Surface the first real diagnostics without dumping the
+      # entire build output (which can be many megabytes).
+      - name: Annotate first compiler errors
+        if: failure()
+        shell: pwsh
+        run: |
+          $log = Join-Path $env:TBUILD "$env:REPO_NAME\out\deltagram-build.log"
+          if (-not (Test-Path $log)) {
+            Write-Output '::error::Build log missing; configuration or library preparation failed.'
+            exit 0
+          }
+          $errors = Select-String -Path $log -Pattern 'error C\d{4}', 'error LNK\d{4}', 'error MSB\d{4}', 'fatal error', 'No space left', 'CMake Error', 'FAILED:', 'out of memory' |
+            Select-Object -First 12
+          if (-not $errors) {
+            Write-Output '::error::Compiler failed without a recognized diagnostic; inspect the Configure and build step.'
+          }
+          foreach ($entry in $errors) {
+            $message = $entry.Line.Trim()
+            if ($message.Length -gt 700) { $message = $message.Substring(0, 700) }
+            Write-Output ('::error::' + $message)
+          }
+
+      - name: Report disk after compilation
+        if: always()
+        shell: pwsh
+        run: |
+          Write-Host ('Free disk after compilation: {0:N1} GB' -f ((Get-PSDrive C).Free / 1GB))
+
+      - name: Free compiled objects before packaging
+        shell: pwsh
+        run: |
+          # The linked executable is complete. These generated MSVC objects
+          # are not needed by windeployqt or the downloadable preview archive.
+          $objects = Join-Path $env:TBUILD "$env:REPO_NAME\out\Telegram\Telegram.dir\Debug"
+          if (Test-Path $objects) { Remove-Item -LiteralPath $objects -Recurse -Force }
+          Write-Host ('Free for packaging: {0:N1} GB' -f ((Get-PSDrive C).Free / 1GB))
+
+      - name: Package preview executable
+        shell: pwsh
+        run: |
+          $binary = Join-Path $env:TBUILD "$env:REPO_NAME\out\Debug\DeltaGram.exe"
+          if (-not (Test-Path $binary)) {
+            $produced = Get-ChildItem (Join-Path $env:TBUILD "$env:REPO_NAME\out\Debug") -Filter *.exe -ErrorAction SilentlyContinue |
+              Select-Object -ExpandProperty Name
+            throw "Expected DeltaGram.exe after the Telegram CMake target build; found: $($produced -join ', ')"
+          }
+          New-Item -ItemType Directory -Force artifact | Out-Null
+          Copy-Item $binary artifact\DeltaGram.exe
+          # prepare.py builds Qt with -static -static-runtime, so DeltaGram.exe
+          # imports no Qt DLLs. windeployqt sees a valid PE file but correctly
+          # reports "does not seem to be a Qt executable" and exits 1. That is
+          # expected for this configuration, not a packaging failure; the
+          # executable is already self-contained.
+          Compress-Archive -Path artifact\* -DestinationPath DeltaGram-win64-preview.zip
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: DeltaGram-win64-preview
+          path: |
+            artifact/
+            DeltaGram-win64-preview.zip
+          if-no-files-found: error
+          retention-days: 14
