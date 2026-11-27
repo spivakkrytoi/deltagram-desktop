@@ -24,8 +24,9 @@ StartWidget::StartWidget(
 	not_null<Data*> data)
 : Step(parent, account, data, true) {
 	setMouseTracking(true);
-	setTitleText(rpl::single(u"Telegram Desktop"_q));
-	setDescriptionText(tr::lng_intro_about());
+	setTitleText(rpl::single(u"DeltaGram"_q));
+	// Do not use a cached Telegram language pack for the welcome copy.
+	setDescriptionText(rpl::single(u"Welcome to DeltaGram.\nIt's fast and secure."_q));
 	show();
 }
 
