@@ -49,12 +49,18 @@ jobs:
             'C:\vcpkg',
             'C:\Program Files\Google\Chrome',
             'C:\Program Files (x86)\Google\Chrome',
+            'C:\Program Files\Microsoft\Edge',
+            'C:\Program Files (x86)\Microsoft\Edge',
+            'C:\Windows\SoftwareDistribution\Download',
             'C:\Program Files\Mozilla Firefox',
             'C:\ProgramData\Package Cache'
           )
           foreach ($path in $unused) {
             Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue
           }
+          # Ephemeral caches that the compiler and Qt preparation never read.
+          Remove-Item "$env:LOCALAPPDATA\Temp\*" -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item 'C:\Windows\Temp\*' -Recurse -Force -ErrorAction SilentlyContinue
           # Build dependencies do not use installed Go/Ruby/JDK caches.
           Get-ChildItem 'C:\hostedtoolcache\windows' -ErrorAction SilentlyContinue |
             Where-Object { $_.Name -match '^(Go|Ruby|PyPy|Java_)' } |
@@ -139,7 +145,7 @@ jobs:
         shell: pwsh
         run: |
           $free = (Get-PSDrive C).Free / 1GB
-          if ($free -lt 32) { throw "Need at least 32 GB free on C: before allocating a 12 GB compiler pagefile; found $([math]::Round($free, 1)) GB." }
+          if ($free -lt 30) { throw "Need at least 30 GB free on C: before allocating a 12 GB compiler pagefile; found $([math]::Round($free, 1)) GB." }
 
       - name: Allocate compiler pagefile
         # v1.5 intermittently throws "SetPageFileSize ... The operation completed
